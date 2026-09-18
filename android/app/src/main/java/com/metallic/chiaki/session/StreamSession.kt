@@ -113,15 +113,15 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 		})
 	}
 
-	fun attachToTextureView(textureView: TextureView)
+	fun attachToSurfaceTexture(texture: SurfaceTexture)
+	{
+		surfaceTexture = texture
+		val surface = Surface(texture)
+		this.surface = surface
+		session?.setSurface(surface)
+	}
 
-fun attachToSurfaceTexture(texture: SurfaceTexture)
-{
-	surfaceTexture = texture
-	val surface = Surface(texture)
-	this.surface = surface
-	session?.setSurface(surface)
-}
+	fun attachToTextureView(textureView: TextureView)
 	{
 		textureView.surfaceTextureListener = object: TextureView.SurfaceTextureListener {
 			override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int)
