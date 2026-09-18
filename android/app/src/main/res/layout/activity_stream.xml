@@ -10,33 +10,21 @@
     android:keepScreenOn="true">
 
     <com.metallic.chiaki.stream.AspectRatioFrameLayout
-    android:id="@+id/aspectRatioLayout"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:layout_gravity="center"/>
+        android:id="@+id/aspectRatioLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"/>
 
-<com.metallic.chiaki.stream.VrStreamView
-    android:id="@+id/vrStreamView"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"/>
+    <com.metallic.chiaki.stream.VrStreamView
+        android:id="@+id/vrStreamView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"/>
 
     <ProgressBar
         android:id="@+id/progressBar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"/>
-
-    <fragment
-        android:id="@+id/controlsFragment"
-        android:name="com.metallic.chiaki.touchcontrols.DefaultTouchControlsFragment"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"/>
-
-    <fragment
-        android:id="@+id/touchpadOnlyFragment"
-        android:name="com.metallic.chiaki.touchcontrols.TouchpadOnlyFragment"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"/>
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/overlay"
@@ -115,6 +103,6 @@
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
 </FrameLayout>
