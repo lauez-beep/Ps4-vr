@@ -214,3 +214,4 @@ class VrStreamView @JvmOverloads constructor(
 		private var width = 0
 		private var height = 0
 	}
+}
