@@ -58,8 +58,6 @@ class VrStreamView @JvmOverloads constructor(
 		private var uTexLoc = 0
 		private var uEyeOffsetLoc = 0
 		private var uBarrelLoc = 0
-		private var uTexMatrixLoc = 0
-		private val texMatrix = FloatArray(16)
 
 		private val quadVertices = floatArrayOf(
 			-1f, -1f,
@@ -74,6 +72,7 @@ class VrStreamView @JvmOverloads constructor(
 			varying vec2 vUV;
 			void main() {
 				vUV = (aPosition + 1.0) * 0.5;
+				vUV.x = 1.0 - vUV.x;
 				gl_Position = vec4(aPosition, 0.0, 1.0);
 			}
 		""".trimIndent()
@@ -215,4 +214,3 @@ class VrStreamView @JvmOverloads constructor(
 		private var width = 0
 		private var height = 0
 	}
-}
