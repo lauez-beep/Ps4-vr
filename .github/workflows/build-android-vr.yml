@@ -27,7 +27,9 @@ jobs:
           sdkmanager --install "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Install protobuf compiler
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+        run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler
+          pip install protobuf
 
       - name: Build APK
         working-directory: android
