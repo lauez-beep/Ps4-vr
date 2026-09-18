@@ -116,7 +116,9 @@ class StreamActivity : AppCompatActivity()
 		}
 
 		//viewModel.session.attachToTextureView(textureView)
-		viewModel.session.attachToSurfaceView(binding.surfaceView)
+		binding.vrStreamView.onSurfaceTextureReady = { texture ->
+	viewModel.session.attachToSurfaceTexture(texture)
+}
 		viewModel.session.state.observe(this, Observer { this.stateChanged(it) })
 		adjustStreamViewAspect()
 
