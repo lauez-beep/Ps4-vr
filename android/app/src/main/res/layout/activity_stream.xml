@@ -32,7 +32,38 @@
         android:layout_height="match_parent"
         android:fitsSystemWindows="true">
 
+        <LinearLayout
+            android:id="@+id/ipdControlRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="4dp"
+            android:background="@color/stream_overlay_background"
+            app:layout_constraintBottom_toTopOf="@id/controlsRow"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="IPD"
+                android:textColor="@color/stream_text"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"/>
+
+            <SeekBar
+                android:id="@+id/ipdSeekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="150"
+                android:progress="20"/>
+
+        </LinearLayout>
+
         <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/controlsRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             app:layout_constraintBottom_toBottomOf="parent"
@@ -101,7 +132,7 @@
 
         </com.google.android.material.button.MaterialButtonToggleGroup>
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+        </androidx.constraintlayout.widget.ConstraintLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
