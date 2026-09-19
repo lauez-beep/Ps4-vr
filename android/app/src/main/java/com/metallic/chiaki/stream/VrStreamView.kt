@@ -6,6 +6,7 @@ import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
+import android.opengl.Matrix
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -14,28 +15,23 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * GLSurfaceView que expone una SurfaceTexture propia (GL_TEXTURE_EXTERNAL_OES)
- * para usar como destino del decoder de Chiaki, y la dibuja dos veces (SBS)
- * con distorsión de barril para visores tipo cardboard.
- *
- * Uso desde StreamActivity:
- *   vrStreamView.onSurfaceTextureReady = { surfaceTexture ->
- *       viewModel.session.attachToSurfaceTexture(surfaceTexture)
- *   }
+ * para usar como destino del decoder de Chiaki, y la dibuja en modo SBS sobre
+ * una pantalla curva (cilíndrica), con distorsión de barril para cardboard.
  */
 class VrStreamView @JvmOverloads constructor(
 	context: Context,
 	attrs: AttributeSet? = null
 ) : GLSurfaceView(context, attrs)
 {
-	// Llamado en el hilo principal cuando la SurfaceTexture ya existe y está lista para usar
 	var onSurfaceTextureReady: ((SurfaceTexture) -> Unit)? = null
 
-	// Ajustables en caliente desde la Activity (sliders)
-	@Volatile var ipd: Float = 0.02f          // separación horizontal entre ojos, en UV (0 a ~0.05)
-	@Volatile var barrelStrength: Float = 0.22f // fuerza de la distorsión de barril
+	@Volatile var ipd: Float = 0.02f
+	@Volatile var barrelStrength: Float = 0.22f
 
 	private val mainHandler = Handler(Looper.getMainLooper())
 	private lateinit var rendererImpl: Renderer_
@@ -51,39 +47,44 @@ class VrStreamView @JvmOverloads constructor(
 
 	private inner class Renderer_ : Renderer
 	{
+		// --- Geometría de la pantalla curva ---
+		private val segments = 32
+		private val arcDegrees = 90f     // cuántos grados de arco cubre la pantalla
+		private val curveRadius = 3f     // distancia de la pantalla al espectador
+		private val halfHeight = 1.1f    // alto medio de la pantalla
+
 		private var textureId = 0
 		private var surfaceTexture: SurfaceTexture? = null
 		private var program = 0
 		private var aPosLoc = 0
+		private var aUVLoc = 0
 		private var uTexLoc = 0
-		private var uEyeOffsetLoc = 0
+		private var uMVPLoc = 0
 		private var uBarrelLoc = 0
 
-		private val quadVertices = floatArrayOf(
-			-1f, -1f,
-			 1f, -1f,
-			-1f,  1f,
-			 1f,  1f
-		)
-		private lateinit var vertexBuffer: FloatBuffer
+		private lateinit var meshBuffer: FloatBuffer
+		private var vertexCount = 0
+
+		private val projMatrix = FloatArray(16)
+		private val viewMatrix = FloatArray(16)
+		private val mvpMatrix = FloatArray(16)
 
 		private val vertexShaderSrc = """
-			attribute vec2 aPosition;
+			uniform mat4 uMVP;
+			attribute vec3 aPosition;
+			attribute vec2 aUV;
 			varying vec2 vUV;
 			void main() {
-				vUV = (aPosition + 1.0) * 0.5;
-				vUV.x = 1.0 - vUV.x;
-				gl_Position = vec4(aPosition, 0.0, 1.0);
+				vUV = aUV;
+				gl_Position = uMVP * vec4(aPosition, 1.0);
 			}
 		""".trimIndent()
 
-		// samplerExternalOES: obligatorio para leer una SurfaceTexture directamente en GLES
 		private val fragmentShaderSrc = """
 			#extension GL_OES_EGL_image_external : require
 			precision mediump float;
 			varying vec2 vUV;
 			uniform samplerExternalOES uTexture;
-			uniform float uEyeOffset;
 			uniform float uBarrel;
 
 			void main() {
@@ -93,9 +94,7 @@ class VrStreamView @JvmOverloads constructor(
 				// distorsión de barril: compensa la lente convexa del cardboard
 				float r2 = dot(uv, uv);
 				uv = uv * (1.0 + uBarrel * r2);
-
 				uv += c;
-				uv.x += uEyeOffset;
 
 				if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
 					gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -104,6 +103,32 @@ class VrStreamView @JvmOverloads constructor(
 				}
 			}
 		""".trimIndent()
+
+		private fun buildMesh()
+		{
+			val halfArcRad = Math.toRadians(arcDegrees.toDouble() / 2.0)
+			val data = ArrayList<Float>((segments + 1) * 2 * 5)
+			for(i in 0..segments)
+			{
+				val t = i.toFloat() / segments
+				val theta = -halfArcRad + t * (2.0 * halfArcRad)
+				val x = (sin(theta) * curveRadius).toFloat()
+				val z = (-cos(theta) * curveRadius).toFloat()
+				val u = 1f - t // invertido para que no salga en espejo
+
+				// vértice de arriba (v = 1)
+				data.add(x); data.add(halfHeight); data.add(z); data.add(u); data.add(1f)
+				// vértice de abajo (v = 0)
+				data.add(x); data.add(-halfHeight); data.add(z); data.add(u); data.add(0f)
+			}
+			vertexCount = (segments + 1) * 2
+
+			val bb = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder())
+			meshBuffer = bb.asFloatBuffer().apply {
+				data.forEach { put(it) }
+				position(0)
+			}
+		}
 
 		override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?)
 		{
@@ -122,17 +147,16 @@ class VrStreamView @JvmOverloads constructor(
 			st.setOnFrameAvailableListener { requestRender() }
 			surfaceTexture = st
 
-			// avisar a la Activity en el hilo principal, ya con la textura lista
 			mainHandler.post { onSurfaceTextureReady?.invoke(st) }
 
 			program = buildProgram(vertexShaderSrc, fragmentShaderSrc)
 			aPosLoc = GLES20.glGetAttribLocation(program, "aPosition")
+			aUVLoc = GLES20.glGetAttribLocation(program, "aUV")
 			uTexLoc = GLES20.glGetUniformLocation(program, "uTexture")
-			uEyeOffsetLoc = GLES20.glGetUniformLocation(program, "uEyeOffset")
+			uMVPLoc = GLES20.glGetUniformLocation(program, "uMVP")
 			uBarrelLoc = GLES20.glGetUniformLocation(program, "uBarrel")
 
-			val bb = ByteBuffer.allocateDirect(quadVertices.size * 4).order(ByteOrder.nativeOrder())
-			vertexBuffer = bb.asFloatBuffer().apply { put(quadVertices); position(0) }
+			buildMesh()
 		}
 
 		override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int)
@@ -155,24 +179,38 @@ class VrStreamView @JvmOverloads constructor(
 			GLES20.glUniform1i(uTexLoc, 0)
 			GLES20.glUniform1f(uBarrelLoc, barrelStrength)
 
-			vertexBuffer.position(0)
+			meshBuffer.position(0)
 			GLES20.glEnableVertexAttribArray(aPosLoc)
-			GLES20.glVertexAttribPointer(aPosLoc, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer)
+			GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, 20, meshBuffer)
+
+			meshBuffer.position(3)
+			GLES20.glEnableVertexAttribArray(aUVLoc)
+			GLES20.glVertexAttribPointer(aUVLoc, 2, GLES20.GL_FLOAT, false, 20, meshBuffer)
 
 			val w = width
 			val h = height
+			val aspect = (w / 2f) / h
 
-			// ojo izquierdo: mitad izquierda de la pantalla
+			// ojo izquierdo
 			GLES20.glViewport(0, 0, w / 2, h)
-			GLES20.glUniform1f(uEyeOffsetLoc, -ipd)
-			GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+			drawEye(-ipd / 2f, aspect)
 
-			// ojo derecho: mitad derecha
+			// ojo derecho
 			GLES20.glViewport(w / 2, 0, w / 2, h)
-			GLES20.glUniform1f(uEyeOffsetLoc, ipd)
-			GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+			drawEye(ipd / 2f, aspect)
 
 			GLES20.glDisableVertexAttribArray(aPosLoc)
+			GLES20.glDisableVertexAttribArray(aUVLoc)
+		}
+
+		private fun drawEye(eyeX: Float, aspect: Float)
+		{
+			Matrix.perspectiveM(projMatrix, 0, 90f, aspect, 0.05f, 100f)
+			Matrix.setLookAtM(viewMatrix, 0, eyeX, 0f, 0f, eyeX, 0f, -1f, 0f, 1f, 0f)
+			Matrix.multiplyMM(mvpMatrix, 0, projMatrix, 0, viewMatrix, 0)
+
+			GLES20.glUniformMatrix4fv(uMVPLoc, 1, false, mvpMatrix, 0)
+			GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, vertexCount)
 		}
 
 		private fun buildProgram(vsSrc: String, fsSrc: String): Int
@@ -210,7 +248,6 @@ class VrStreamView @JvmOverloads constructor(
 			return shader
 		}
 
-		// dimensiones actuales del viewport, actualizadas en onSurfaceChanged
 		private var width = 0
 		private var height = 0
 	}
