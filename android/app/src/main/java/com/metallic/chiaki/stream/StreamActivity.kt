@@ -9,6 +9,7 @@ import android.graphics.Matrix
 import android.os.*
 import android.view.*
 import android.widget.EditText
+import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
@@ -117,10 +118,22 @@ class StreamActivity : AppCompatActivity()
 
 		//viewModel.session.attachToTextureView(textureView)
 		binding.vrStreamView.onSurfaceTextureReady = { texture ->
-	viewModel.session.attachToSurfaceTexture(texture)
-}
+			viewModel.session.attachToSurfaceTexture(texture)
+		}
 		viewModel.session.state.observe(this, Observer { this.stateChanged(it) })
 		adjustStreamViewAspect()
+
+		// Slider de IPD: progreso 0..150 representa un IPD de 0.000 a 0.150
+		binding.ipdSeekBar.max = 150
+		binding.ipdSeekBar.progress = (binding.vrStreamView.ipd * 1000).toInt()
+		binding.ipdSeekBar.setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+			override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean)
+			{
+				binding.vrStreamView.ipd = progress / 1000f
+			}
+			override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+			override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+		})
 
 		if(Preferences(this).rumbleEnabled)
 		{
