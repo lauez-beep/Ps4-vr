@@ -359,6 +359,28 @@ class StreamActivity : AppCompatActivity()
 
 	private fun adjustStreamViewAspect() = adjustSurfaceViewAspect()
 
+	override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean
+	{
+		when(keyCode)
+		{
+			KeyEvent.KEYCODE_VOLUME_UP ->
+			{
+				val newIpd = (binding.vrStreamView.ipd + 0.002f).coerceIn(0f, 0.15f)
+				binding.vrStreamView.ipd = newIpd
+				binding.ipdSeekBar.progress = (newIpd * 1000).toInt()
+				return true
+			}
+			KeyEvent.KEYCODE_VOLUME_DOWN ->
+			{
+				val newIpd = (binding.vrStreamView.ipd - 0.002f).coerceIn(0f, 0.15f)
+				binding.vrStreamView.ipd = newIpd
+				binding.ipdSeekBar.progress = (newIpd * 1000).toInt()
+				return true
+			}
+		}
+		return super.onKeyDown(keyCode, event)
+	}
+
 	override fun dispatchKeyEvent(event: KeyEvent) = viewModel.input.dispatchKeyEvent(event) || super.dispatchKeyEvent(event)
 	override fun onGenericMotionEvent(event: MotionEvent) = viewModel.input.onGenericMotionEvent(event) || super.onGenericMotionEvent(event)
 }
