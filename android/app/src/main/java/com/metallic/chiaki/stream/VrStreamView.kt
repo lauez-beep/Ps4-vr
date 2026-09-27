@@ -51,7 +51,7 @@ class VrStreamView @JvmOverloads constructor(
 		private val segments = 32
 		private val arcDegrees = 90f     // cuántos grados de arco cubre la pantalla
 		private val curveRadius = 3f     // distancia de la pantalla al espectador
-		private val halfHeight = 1.1f    // alto medio de la pantalla
+		private val halfHeight = 1.19f    // alto medio de la pantalla
 
 		private var textureId = 0
 		private var surfaceTexture: SurfaceTexture? = null
@@ -205,7 +205,7 @@ class VrStreamView @JvmOverloads constructor(
 
 		private fun drawEye(eyeX: Float, aspect: Float)
 		{
-			Matrix.perspectiveM(projMatrix, 0, 90f, aspect, 0.05f, 100f)
+			Matrix.perspectiveM(projMatrix, 0, 55f, aspect, 0.05f, 100f)
 			Matrix.setLookAtM(viewMatrix, 0, eyeX, 0f, 0f, eyeX, 0f, -1f, 0f, 1f, 0f)
 			Matrix.multiplyMM(mvpMatrix, 0, projMatrix, 0, viewMatrix, 0)
 
