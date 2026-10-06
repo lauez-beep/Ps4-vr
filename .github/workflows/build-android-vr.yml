@@ -35,10 +35,10 @@ jobs:
         working-directory: android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: chiaki-vr-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: chiaki-tv-apk
+          path: android/app/build/outputs/apk/release/*.apk
