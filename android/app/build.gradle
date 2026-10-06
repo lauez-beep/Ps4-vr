@@ -101,6 +101,8 @@ android {
         signingConfigs.release.keyPassword = properties.get("chiakiKeyPW")
     } else {
         println("Signing not enabled")
+        // Sin keystore propio: firmar el release con la clave debug para poder instalar el APK
+        buildTypes.release.signingConfig = signingConfigs.debug
     }
 }
 
