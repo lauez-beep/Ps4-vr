@@ -3,6 +3,7 @@
 package com.metallic.chiaki.session
 
 import android.graphics.SurfaceTexture
+import android.os.Build
 import android.util.Log
 import android.view.*
 import androidx.lifecycle.LiveData
@@ -102,6 +103,7 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 			{
 				val surface = holder.surface
 				this@StreamSession.surface = surface
+				applyFrameRateHint(surface)
 				session?.setSurface(surface)
 			}
 
@@ -111,6 +113,17 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 				session?.setSurface(null)
 			}
 		})
+	}
+
+	// Le avisa al sistema a cuántos fps llega el video, para que el TV iguale su tasa de refresco
+	// (Android 11+; en versiones anteriores no hace nada)
+	private fun applyFrameRateHint(surface: Surface)
+	{
+		if(Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+			return
+		runCatching {
+			surface.setFrameRate(connectInfo.videoProfile.maxFPS.toFloat(), Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+		}
 	}
 
 	fun attachToSurfaceTexture(texture: SurfaceTexture)
