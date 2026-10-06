@@ -13,12 +13,15 @@
         android:id="@+id/aspectRatioLayout"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_gravity="center"/>
+        android:layout_gravity="center">
 
-    <com.metallic.chiaki.stream.VrStreamView
-        android:id="@+id/vrStreamView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"/>
+        <!-- SurfaceView directo: el decoder (MediaCodec) dibuja sin pasar por OpenGL -->
+        <SurfaceView
+            android:id="@+id/surfaceView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
+
+    </com.metallic.chiaki.stream.AspectRatioFrameLayout>
 
     <ProgressBar
         android:id="@+id/progressBar"
@@ -32,36 +35,6 @@
         android:layout_height="match_parent"
         android:fitsSystemWindows="true">
 
-        <LinearLayout
-            android:id="@+id/ipdControlRow"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="4dp"
-            android:background="@color/stream_overlay_background"
-            app:layout_constraintBottom_toTopOf="@id/controlsRow"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="IPD"
-                android:textColor="@color/stream_text"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp"/>
-
-            <SeekBar
-                android:id="@+id/ipdSeekBar"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:max="150"
-                android:progress="20"/>
-
-        </LinearLayout>
-
         <androidx.constraintlayout.widget.ConstraintLayout
             android:id="@+id/controlsRow"
             android:layout_width="match_parent"
@@ -72,34 +45,14 @@
             android:clickable="true"
             android:focusable="false">
 
-            <com.google.android.material.switchmaterial.SwitchMaterial
-                android:id="@+id/onScreenControlsSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintBottom_toBottomOf="parent"
-                android:text="@string/stream_on_screen_controls"
-                app:switchPadding="8dp"
-                android:layout_marginLeft="8dp"
-                android:textColor="@color/stream_text"/>
-
-            <com.google.android.material.switchmaterial.SwitchMaterial
-                android:id="@+id/touchpadOnlySwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="200dp"
-                android:text="@string/stream_touchpad_only"
-                android:textColor="@color/stream_text"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:switchPadding="8dp" />
-
+            <!-- Modo de pantalla: normal / zoom / estirar. Se abre con MENU o el botón central del control remoto -->
             <com.google.android.material.button.MaterialButtonToggleGroup
                 android:id="@+id/displayModeToggle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
                 app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:singleSelection="true"
                 app:selectionRequired="true"
@@ -108,29 +61,32 @@
                 <com.google.android.material.button.MaterialButton
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:id="@+id/display_mode_normal_button"
-                    android:layout_width="60dp"
+                    android:layout_width="80dp"
                     android:layout_height="wrap_content"
+                    android:focusable="true"
                     app:icon="@drawable/ic_display_normal"
                     app:iconTint="@color/stream_material_button_icon_tint"
                     app:strokeColor="@color/stream_text"/>
                 <com.google.android.material.button.MaterialButton
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:id="@+id/display_mode_zoom_button"
-                    android:layout_width="60dp"
+                    android:layout_width="80dp"
                     android:layout_height="wrap_content"
+                    android:focusable="true"
                     app:icon="@drawable/ic_display_zoom"
                     app:iconTint="@color/stream_material_button_icon_tint"
                     app:strokeColor="@color/stream_text"/>
                 <com.google.android.material.button.MaterialButton
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:id="@+id/display_mode_stretch_button"
-                    android:layout_width="60dp"
+                    android:layout_width="80dp"
                     android:layout_height="wrap_content"
+                    android:focusable="true"
                     app:icon="@drawable/ic_display_stretch"
                     app:iconTint="@color/stream_material_button_icon_tint"
                     app:strokeColor="@color/stream_text"/>
 
-        </com.google.android.material.button.MaterialButtonToggleGroup>
+            </com.google.android.material.button.MaterialButtonToggleGroup>
 
         </androidx.constraintlayout.widget.ConstraintLayout>
 
