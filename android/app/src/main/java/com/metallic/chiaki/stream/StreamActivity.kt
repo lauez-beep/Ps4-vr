@@ -9,7 +9,6 @@ import android.graphics.Matrix
 import android.os.*
 import android.view.*
 import android.widget.EditText
-import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
@@ -47,7 +46,8 @@ class StreamActivity : AppCompatActivity()
 	companion object
 	{
 		const val EXTRA_CONNECT_INFO = "connect_info"
-		private const val HIDE_UI_TIMEOUT_MS = 2000L
+		// más largo que en el celular: con el control remoto cuesta más moverse por los botones
+		private const val HIDE_UI_TIMEOUT_MS = 4000L
 	}
 
 	private lateinit var viewModel: StreamViewModel
@@ -89,51 +89,19 @@ class StreamActivity : AppCompatActivity()
 			insets
 		}
 
-		viewModel.onScreenControlsEnabled.observe(this, Observer {
-			if(binding.onScreenControlsSwitch.isChecked != it)
-				binding.onScreenControlsSwitch.isChecked = it
-			if(binding.onScreenControlsSwitch.isChecked)
-				binding.touchpadOnlySwitch.isChecked = false
-		})
-		binding.onScreenControlsSwitch.setOnCheckedChangeListener { _, isChecked ->
-			viewModel.setOnScreenControlsEnabled(isChecked)
-			showOverlay()
-		}
-
-		viewModel.touchpadOnlyEnabled.observe(this, Observer {
-			if(binding.touchpadOnlySwitch.isChecked != it)
-				binding.touchpadOnlySwitch.isChecked = it
-			if(binding.touchpadOnlySwitch.isChecked)
-				binding.onScreenControlsSwitch.isChecked = false
-		})
-		binding.touchpadOnlySwitch.setOnCheckedChangeListener { _, isChecked ->
-			viewModel.setTouchpadOnlyEnabled(isChecked)
-			showOverlay()
-		}
-
 		binding.displayModeToggle.addOnButtonCheckedListener { _, _, _ ->
 			adjustStreamViewAspect()
 			showOverlay()
 		}
 
-		//viewModel.session.attachToTextureView(textureView)
-		binding.vrStreamView.onSurfaceTextureReady = { texture ->
-			viewModel.session.attachToSurfaceTexture(texture)
-		}
+		// SurfaceView directo (sin OpenGL): es lo más liviano para el decoder, clave en Google TV
+		viewModel.session.attachToSurfaceView(binding.surfaceView)
 		viewModel.session.state.observe(this, Observer { this.stateChanged(it) })
 		adjustStreamViewAspect()
 
-		// Slider de IPD: progreso 0..150 representa un IPD de 0.000 a 0.150
-		binding.ipdSeekBar.max = 150
-		binding.ipdSeekBar.progress = (binding.vrStreamView.ipd * 1000).toInt()
-		binding.ipdSeekBar.setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
-			override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean)
-			{
-				binding.vrStreamView.ipd = progress / 1000f
-			}
-			override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-			override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-		})
+		// El overlay arranca oculto; en TV no hay barras de sistema que lo muestren solas
+		binding.overlay.alpha = 0f
+		binding.overlay.isGone = true
 
 		if(Preferences(this).rumbleEnabled)
 		{
@@ -193,7 +161,11 @@ class StreamActivity : AppCompatActivity()
 		viewModel.session.resume()
 	}
 
-	private val hideSystemUIRunnable = Runnable { hideSystemUI() }
+	// En TV hideSystemUI() no cambia ningún inset, así que el overlay se oculta explícitamente
+	private val hideSystemUIRunnable = Runnable {
+		hideSystemUI()
+		hideOverlay()
+	}
 
 	private fun showOverlay()
 	{
@@ -359,24 +331,16 @@ class StreamActivity : AppCompatActivity()
 
 	private fun adjustStreamViewAspect() = adjustSurfaceViewAspect()
 
+	// Control remoto de Google TV: MENU o el botón central abren el selector de modo de pantalla.
+	// Los botones de un joystick/gamepad nunca llegan acá (StreamInput los consume antes).
 	override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean
 	{
-		when(keyCode)
+		val fromGamepad = event != null && (event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+		if(!fromGamepad && (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_DPAD_CENTER))
 		{
-			KeyEvent.KEYCODE_VOLUME_UP ->
-			{
-				val newIpd = (binding.vrStreamView.ipd + 0.002f).coerceIn(0f, 0.15f)
-				binding.vrStreamView.ipd = newIpd
-				binding.ipdSeekBar.progress = (newIpd * 1000).toInt()
-				return true
-			}
-			KeyEvent.KEYCODE_VOLUME_DOWN ->
-			{
-				val newIpd = (binding.vrStreamView.ipd - 0.002f).coerceIn(0f, 0.15f)
-				binding.vrStreamView.ipd = newIpd
-				binding.ipdSeekBar.progress = (newIpd * 1000).toInt()
-				return true
-			}
+			showOverlay()
+			binding.displayModeToggle.findViewById<View>(binding.displayModeToggle.checkedButtonId)?.requestFocus()
+			return true
 		}
 		return super.onKeyDown(keyCode, event)
 	}
