@@ -9,16 +9,18 @@
 #include <android/native_window_jni.h>
 
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
 
 #define INPUT_BUFFER_TIMEOUT_MS 10
 
+static uint64_t now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
 static void *android_chiaki_video_decoder_output_thread_func(void *user);
-
-// tras recrear el decoder pedimos un keyframe nuevo a la consola
-static bool need_keyframe = false;
-static bool swap_failed_once = false;
-
 
 ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *decoder, ChiakiLog *log, int32_t target_width, int32_t target_height, ChiakiCodec codec)
 {
@@ -65,17 +67,15 @@ void android_chiaki_video_decoder_fini(AndroidChiakiVideoDecoder *decoder)
 
 void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder, JNIEnv *env, jobject surface)
 {
-	CHIAKI_LOGI(decoder->log, "set_surface called (surface %s), waiting for decoder mutex", surface ? "valid" : "null");
 	chiaki_mutex_lock(&decoder->codec_mutex);
-	CHIAKI_LOGI(decoder->log, "set_surface got decoder mutex");
 
 	if(!surface)
 	{
-		// La pantalla se destruyo (app en segundo plano). NO tocamos el decoder:
-		// la sesion y el audio siguen, el video se descarta. Al volver se cambia
-		// la superficie de salida del decoder ya existente.
-		CHIAKI_LOGI(decoder->log, "Surface removed, keeping decoder alive (background)");
-		chiaki_mutex_unlock(&decoder->codec_mutex);
+		if(decoder->codec)
+		{
+			kill_decoder(decoder);
+			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
+		}
 		return;
 	}
 
@@ -83,41 +83,14 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	{
 #if __ANDROID_API__ >= 23
 		CHIAKI_LOGI(decoder->log, "Video decoder already initialized, swapping surface");
-		ANativeWindow *new_window = ANativeWindow_fromSurface(env, surface);
-		media_status_t sr = AMediaCodec_setOutputSurface(decoder->codec, new_window);
-		if(sr == AMEDIA_OK)
-		{
-			if(decoder->window)
-				ANativeWindow_release(decoder->window);
-			decoder->window = new_window;
-			swap_failed_once = false;
-			goto beach;
-		}
-		if(!swap_failed_once)
-		{
-			// Primer fallo: NO destruir el decoder (hacerlo desde aqui bloquea la app).
-			// Se deja como esta y se reintenta con la proxima superficie.
-			CHIAKI_LOGE(decoder->log, "Swapping surface failed (%d), keeping decoder as is", (int)sr);
-			ANativeWindow_release(new_window);
-			swap_failed_once = true;
-			goto beach;
-		}
-		// El decoder quedo inutilizable (superficie anterior abandonada): recrearlo
-		CHIAKI_LOGE(decoder->log, "Swapping surface failed (%d), recreating decoder", (int)sr);
-		ANativeWindow_release(new_window);
-		kill_decoder(decoder); // libera el mutex
-		chiaki_mutex_lock(&decoder->codec_mutex);
-		if(decoder->window)
-		{
-			ANativeWindow_release(decoder->window);
-			decoder->window = NULL;
-		}
-		swap_failed_once = false;
-		need_keyframe = true;
+		ANativeWindow *new_window = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
+		AMediaCodec_setOutputSurface(decoder->codec, new_window);
+		ANativeWindow_release(decoder->window);
+		decoder->window = new_window;
 #else
 		CHIAKI_LOGE(decoder->log, "Video Decoder already initialized");
-		goto beach;
 #endif
+		goto beach;
 	}
 
 	decoder->window = ANativeWindow_fromSurface(env, surface);
@@ -136,6 +109,15 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, decoder->target_width);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, decoder->target_height);
+
+	// Latencia minima. Sin esto muchos decoders de TV acumulan frames antes de mostrarlos
+	// (a 30 fps se ve congelado, a 60 se ahoga a los segundos). Las claves que el decoder
+	// no conoce se ignoran, asi que se pueden pedir todas juntas.
+	AMediaFormat_setInt32(format, "low-latency", 1);                           // Android 11+
+	AMediaFormat_setInt32(format, "priority", 0);                              // tiempo real
+	AMediaFormat_setInt32(format, "operating-rate", 120);                      // no limitar el ritmo
+	AMediaFormat_setInt32(format, "vendor.qti-ext-dec-low-latency.enable", 1); // Qualcomm
+	AMediaFormat_setInt32(format, "vdec-lowlatency", 1);                       // Amlogic
 
 	media_status_t r = AMediaCodec_configure(decoder->codec, format, decoder->window, NULL, 0);
 	if(r != AMEDIA_OK)
@@ -182,17 +164,12 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, in
 
 	if(!decoder->codec)
 	{
-		// sin decoder (modo solo audio): descartar el video en silencio
+		CHIAKI_LOGE(decoder->log, "Received video data, but decoder is not initialized!");
 		goto beach;
 	}
 
-	if(need_keyframe)
-	{
-		// devolver false hace que Chiaki pida un IDR a la consola
-		need_keyframe = false;
-		r = false;
-		goto beach;
-	}
+	if(frames_lost > 0)
+		CHIAKI_LOGW(decoder->log, "Video frames lost: %d (recovered: %d)", (int)frames_lost, (int)frame_recovered);
 
 	while(buf_size > 0)
 	{
@@ -231,6 +208,8 @@ beach:
 static void *android_chiaki_video_decoder_output_thread_func(void *user)
 {
 	AndroidChiakiVideoDecoder *decoder = user;
+	uint64_t stats_start = now_ms();
+	unsigned int stats_frames = 0;
 
 	while(1)
 	{
@@ -239,6 +218,15 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 		if(status >= 0)
 		{
 			AMediaCodec_releaseOutputBuffer(decoder->codec, (size_t)status, info.size != 0);
+			if(info.size != 0)
+				stats_frames++;
+			uint64_t now = now_ms();
+			if(now - stats_start >= 2000)
+			{
+				CHIAKI_LOGI(decoder->log, "Video Decoder output: %u frames in %u ms", stats_frames, (unsigned int)(now - stats_start));
+				stats_start = now;
+				stats_frames = 0;
+			}
 			if(info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)
 			{
 				CHIAKI_LOGI(decoder->log, "AMediaCodec reported EOS");
@@ -255,8 +243,6 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 				CHIAKI_LOGI(decoder->log, "Video Decoder Output Thread detected shutdown after reported error");
 				break;
 			}
-			if(status != AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED && status != AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED && status != AMEDIACODEC_INFO_TRY_AGAIN_LATER)
-				usleep(5000); // evita un bucle al 100% de CPU si el decoder esta en error
 		}
 	}
 
