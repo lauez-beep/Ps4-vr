@@ -10,6 +10,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.metallic.chiaki.common.LogManager
 import com.metallic.chiaki.lib.*
+import com.metallic.chiaki.stream.DebugTrace
 
 sealed class StreamState
 object StreamStateIdle: StreamState()
@@ -127,16 +128,21 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 
 			override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int)
 			{
+				DebugTrace.log("session: surfaceChanged inicio")
 				val surface = holder.surface
 				this@StreamSession.surface = surface
 				applyFrameRateHint(surface)
 				session?.setSurface(surface)
+				DebugTrace.log("session: surfaceChanged fin")
 			}
 
 			override fun surfaceDestroyed(holder: SurfaceHolder)
 			{
 				this@StreamSession.surface = null
-				session?.setSurface(null)
+				// Cambiar la salida del decoder ANTES de que la pantalla real se destruya
+				DebugTrace.log("session: surfaceDestroyed inicio")
+				session?.setSurface(getDummySurface())
+				DebugTrace.log("session: surfaceDestroyed fin")
 			}
 		})
 	}
