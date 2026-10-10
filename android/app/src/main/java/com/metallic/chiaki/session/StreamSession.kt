@@ -2,7 +2,11 @@
 
 package com.metallic.chiaki.session
 
+import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
+import android.media.ImageReader
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.Build
 import android.util.Log
 import android.view.*
@@ -34,23 +38,25 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 	private var surface: Surface? = null
 
 	// Superficie "basura" a la que el decoder sigue mandando video cuando la app pasa a segundo plano.
-	// Asi el decoder nunca queda apuntando a una pantalla destruida (eso lo congelaba).
-	private var dummySurfaceTexture: SurfaceTexture? = null
-	private var dummySurface: Surface? = null
+	// Es un ImageReader que descarta cada imagen: asi el decoder nunca queda apuntando a una pantalla destruida.
+	private var dummyReader: ImageReader? = null
+	private var dummyThread: HandlerThread? = null
 
 	private fun getDummySurface(): Surface?
 	{
-		dummySurface?.let { return it }
-		if(Build.VERSION.SDK_INT < Build.VERSION_CODES.O)
-			return null
+		dummyReader?.let { return it.surface }
 		return try
 		{
-			val st = SurfaceTexture(true)
-			st.setDefaultBufferSize(connectInfo.videoProfile.width, connectInfo.videoProfile.height)
-			val s = Surface(st)
-			dummySurfaceTexture = st
-			dummySurface = s
-			s
+			val thread = HandlerThread("chiaki-dummy-surface")
+			thread.start()
+			val reader = ImageReader.newInstance(
+				connectInfo.videoProfile.width, connectInfo.videoProfile.height, ImageFormat.YUV_420_888, 3)
+			reader.setOnImageAvailableListener({ r ->
+				try { r.acquireLatestImage()?.close() } catch(e: Throwable) {}
+			}, Handler(thread.looper))
+			dummyThread = thread
+			dummyReader = reader
+			reader.surface
 		}
 		catch(e: Throwable)
 		{
