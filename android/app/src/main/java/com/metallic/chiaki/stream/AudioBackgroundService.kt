@@ -175,6 +175,19 @@ class AudioBackgroundService : Service()
 /** Registro simple de diagnostico: guarda pasos y errores en un archivo para mostrarlos en el proximo arranque. */
 object DebugTrace
 {
+	@Volatile private var appContext: Context? = null
+
+	fun init(context: Context)
+	{
+		appContext = context.applicationContext
+	}
+
+	/** Version sin Context: usa el que se guardo con init() */
+	fun log(msg: String)
+	{
+		appContext?.let { add(it, msg) }
+	}
+
 	private fun file(context: Context) = File(context.filesDir, "trace.txt")
 
 	@Synchronized
