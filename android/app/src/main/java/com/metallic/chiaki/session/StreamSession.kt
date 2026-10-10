@@ -32,6 +32,32 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 	private var surfaceTexture: SurfaceTexture? = null
 	private var surface: Surface? = null
 
+	// Superficie "basura" a la que el decoder sigue mandando video cuando la app pasa a segundo plano.
+	// Asi el decoder nunca queda apuntando a una pantalla destruida (eso lo congelaba).
+	private var dummySurfaceTexture: SurfaceTexture? = null
+	private var dummySurface: Surface? = null
+
+	private fun getDummySurface(): Surface?
+	{
+		dummySurface?.let { return it }
+		if(Build.VERSION.SDK_INT < Build.VERSION_CODES.O)
+			return null
+		return try
+		{
+			val st = SurfaceTexture(true)
+			st.setDefaultBufferSize(connectInfo.videoProfile.width, connectInfo.videoProfile.height)
+			val s = Surface(st)
+			dummySurfaceTexture = st
+			dummySurface = s
+			s
+		}
+		catch(e: Throwable)
+		{
+			Log.e("StreamSession", "No se pudo crear la superficie auxiliar", e)
+			null
+		}
+	}
+
 	init
 	{
 		input.controllerStateChangedCallback = {
