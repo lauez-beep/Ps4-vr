@@ -88,6 +88,20 @@ class StreamActivity : AppCompatActivity()
 		binding = ActivityStreamBinding.inflate(layoutInflater)
 		setContentView(binding.root)
 
+		// Diagnostico: guardar cualquier crash y mostrar el registro del uso anterior
+		val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+		Thread.setDefaultUncaughtExceptionHandler { t, e ->
+			DebugTrace.addError(applicationContext, "CRASH en hilo ${t.name}", e)
+			prevHandler?.uncaughtException(t, e)
+		}
+		DebugTrace.takeAndClear(this)?.let { text ->
+			MaterialAlertDialogBuilder(this)
+				.setTitle("Registro de diagnostico")
+				.setMessage(text)
+				.setPositiveButton("OK", null)
+				.show()
+		}
+
 		WindowCompat.setDecorFitsSystemWindows(window, false)
 		insetsController = WindowCompat.getInsetsController(window, window.decorView)
 		insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -147,6 +161,7 @@ class StreamActivity : AppCompatActivity()
 	override fun onResume()
 	{
 		super.onResume()
+		DebugTrace.add(this, "activity: onResume (bg=$backgroundAudioActive)")
 		hideSystemUI()
 		if(backgroundAudioActive)
 		{
@@ -167,14 +182,23 @@ class StreamActivity : AppCompatActivity()
 			// Home / pantalla apagada: seguir con el audio como un reproductor de musica
 			backgroundAudioActive = true
 			AudioBackgroundService.onStopRequested = { finishAndRemoveTask() }
-			AudioBackgroundService.start(this)
+			DebugTrace.add(this, "activity: onPause -> iniciando servicio")
+			try { AudioBackgroundService.start(this) } catch(e: Throwable) { DebugTrace.addError(this, "start service", e) }
+			DebugTrace.add(this, "activity: onPause fin")
 		}
 		else
 			viewModel.session.pause()
 	}
 
+	override fun onStop()
+	{
+		DebugTrace.add(this, "activity: onStop")
+		super.onStop()
+	}
+
 	override fun onDestroy()
 	{
+		DebugTrace.add(this, "activity: onDestroy (bg=$backgroundAudioActive)")
 		super.onDestroy()
 		controlsJob?.cancel()
 		if(backgroundAudioActive)
