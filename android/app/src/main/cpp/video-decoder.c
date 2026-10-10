@@ -17,6 +17,7 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user);
 
 // tras recrear el decoder pedimos un keyframe nuevo a la consola
 static bool need_keyframe = false;
+static bool swap_failed_once = false;
 
 
 ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *decoder, ChiakiLog *log, int32_t target_width, int32_t target_height, ChiakiCodec codec)
@@ -89,6 +90,16 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 			if(decoder->window)
 				ANativeWindow_release(decoder->window);
 			decoder->window = new_window;
+			swap_failed_once = false;
+			goto beach;
+		}
+		if(!swap_failed_once)
+		{
+			// Primer fallo: NO destruir el decoder (hacerlo desde aqui bloquea la app).
+			// Se deja como esta y se reintenta con la proxima superficie.
+			CHIAKI_LOGE(decoder->log, "Swapping surface failed (%d), keeping decoder as is", (int)sr);
+			ANativeWindow_release(new_window);
+			swap_failed_once = true;
 			goto beach;
 		}
 		// El decoder quedo inutilizable (superficie anterior abandonada): recrearlo
@@ -101,6 +112,7 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 			ANativeWindow_release(decoder->window);
 			decoder->window = NULL;
 		}
+		swap_failed_once = false;
 		need_keyframe = true;
 #else
 		CHIAKI_LOGE(decoder->log, "Video Decoder already initialized");
