@@ -15,6 +15,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.util.Log
+import java.io.File
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
@@ -64,14 +66,31 @@ class AudioBackgroundService : Service()
 			return START_NOT_STICKY
 		}
 
-		createChannel()
-		val notification = buildNotification()
-		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-			ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-		else
-			startForeground(NOTIFICATION_ID, notification)
+		DebugTrace.add(this, "service: onStartCommand")
+		try
+		{
+			createChannel()
+			val notification = buildNotification()
+			if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+				ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+			else
+				startForeground(NOTIFICATION_ID, notification)
+			DebugTrace.add(this, "service: startForeground OK")
+		}
+		catch(e: Throwable)
+		{
+			DebugTrace.addError(this, "startForeground", e)
+		}
 
-		acquireLocks()
+		try
+		{
+			acquireLocks()
+			DebugTrace.add(this, "service: locks OK")
+		}
+		catch(e: Throwable)
+		{
+			DebugTrace.addError(this, "acquireLocks", e)
+		}
 		return START_NOT_STICKY
 	}
 
@@ -150,5 +169,42 @@ class AudioBackgroundService : Service()
 			.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 			.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Detener", stopPending)
 			.build()
+	}
+}
+
+/** Registro simple de diagnostico: guarda pasos y errores en un archivo para mostrarlos en el proximo arranque. */
+object DebugTrace
+{
+	private fun file(context: Context) = File(context.filesDir, "trace.txt")
+
+	@Synchronized
+	fun add(context: Context, msg: String)
+	{
+		try
+		{
+			Log.i("ChiakiTrace", msg)
+			file(context).appendText("${System.currentTimeMillis() % 100000000} $msg\n")
+		}
+		catch(e: Throwable) {}
+	}
+
+	fun addError(context: Context, where: String, e: Throwable)
+	{
+		add(context, "ERROR en $where: ${Log.getStackTraceString(e).take(1500)}")
+	}
+
+	@Synchronized
+	fun takeAndClear(context: Context): String?
+	{
+		return try
+		{
+			val f = file(context)
+			if(!f.exists())
+				return null
+			val text = f.readLines().takeLast(40).joinToString("\n")
+			f.delete()
+			text
+		}
+		catch(e: Throwable) { null }
 	}
 }
