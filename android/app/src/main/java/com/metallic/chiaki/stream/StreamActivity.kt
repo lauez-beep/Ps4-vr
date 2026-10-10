@@ -88,6 +88,7 @@ class StreamActivity : AppCompatActivity()
 		binding = ActivityStreamBinding.inflate(layoutInflater)
 		setContentView(binding.root)
 
+		DebugTrace.init(this)
 		// Diagnostico: guardar cualquier crash y mostrar el registro del uso anterior
 		val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
 		Thread.setDefaultUncaughtExceptionHandler { t, e ->
