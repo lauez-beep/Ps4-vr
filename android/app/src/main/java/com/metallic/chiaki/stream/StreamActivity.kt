@@ -5,11 +5,15 @@ package com.metallic.chiaki.stream
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.app.AlertDialog
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Matrix
 import android.os.*
 import android.view.*
 import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.core.view.ViewCompat
@@ -46,8 +50,7 @@ class StreamActivity : AppCompatActivity()
 	companion object
 	{
 		const val EXTRA_CONNECT_INFO = "connect_info"
-		// más largo que en el celular: con el control remoto cuesta más moverse por los botones
-		private const val HIDE_UI_TIMEOUT_MS = 4000L
+		private const val HIDE_UI_TIMEOUT_MS = 2000L
 	}
 
 	private lateinit var viewModel: StreamViewModel
@@ -55,6 +58,9 @@ class StreamActivity : AppCompatActivity()
 	private lateinit var insetsController: WindowInsetsControllerCompat
 
 	private val uiVisibilityHandler = Handler(Looper.getMainLooper())
+
+	// true cuando la sesion sigue viva en segundo plano (solo audio)
+	private var backgroundAudioActive = false
 
 	override fun onCreate(savedInstanceState: Bundle?)
 	{
@@ -73,6 +79,12 @@ class StreamActivity : AppCompatActivity()
 
 		viewModel.input.observe(this)
 
+		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+			&& ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+		{
+			ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+		}
+
 		binding = ActivityStreamBinding.inflate(layoutInflater)
 		setContentView(binding.root)
 
@@ -89,19 +101,37 @@ class StreamActivity : AppCompatActivity()
 			insets
 		}
 
+		viewModel.onScreenControlsEnabled.observe(this, Observer {
+			if(binding.onScreenControlsSwitch.isChecked != it)
+				binding.onScreenControlsSwitch.isChecked = it
+			if(binding.onScreenControlsSwitch.isChecked)
+				binding.touchpadOnlySwitch.isChecked = false
+		})
+		binding.onScreenControlsSwitch.setOnCheckedChangeListener { _, isChecked ->
+			viewModel.setOnScreenControlsEnabled(isChecked)
+			showOverlay()
+		}
+
+		viewModel.touchpadOnlyEnabled.observe(this, Observer {
+			if(binding.touchpadOnlySwitch.isChecked != it)
+				binding.touchpadOnlySwitch.isChecked = it
+			if(binding.touchpadOnlySwitch.isChecked)
+				binding.onScreenControlsSwitch.isChecked = false
+		})
+		binding.touchpadOnlySwitch.setOnCheckedChangeListener { _, isChecked ->
+			viewModel.setTouchpadOnlyEnabled(isChecked)
+			showOverlay()
+		}
+
 		binding.displayModeToggle.addOnButtonCheckedListener { _, _, _ ->
 			adjustStreamViewAspect()
 			showOverlay()
 		}
 
-		// SurfaceView directo (sin OpenGL): es lo más liviano para el decoder, clave en Google TV
+		//viewModel.session.attachToTextureView(textureView)
 		viewModel.session.attachToSurfaceView(binding.surfaceView)
 		viewModel.session.state.observe(this, Observer { this.stateChanged(it) })
 		adjustStreamViewAspect()
-
-		// El overlay arranca oculto; en TV no hay barras de sistema que lo muestren solas
-		binding.overlay.alpha = 0f
-		binding.overlay.isGone = true
 
 		if(Preferences(this).rumbleEnabled)
 		{
@@ -140,19 +170,43 @@ class StreamActivity : AppCompatActivity()
 	{
 		super.onResume()
 		hideSystemUI()
-		viewModel.session.resume()
+		if(backgroundAudioActive)
+		{
+			// la sesion nunca se detuvo: solo volvemos a mostrar el video
+			backgroundAudioActive = false
+			AudioBackgroundService.onStopRequested = null
+			AudioBackgroundService.stop(this)
+		}
+		else
+			viewModel.session.resume()
 	}
 
 	override fun onPause()
 	{
 		super.onPause()
-		viewModel.session.pause()
+		if(!isFinishing)
+		{
+			// Home / pantalla apagada: seguir con el audio como un reproductor de musica
+			backgroundAudioActive = true
+			AudioBackgroundService.onStopRequested = { finishAndRemoveTask() }
+			AudioBackgroundService.start(this)
+		}
+		else
+			viewModel.session.pause()
 	}
 
 	override fun onDestroy()
 	{
 		super.onDestroy()
 		controlsJob?.cancel()
+		if(backgroundAudioActive)
+		{
+			// se cerro estando en segundo plano (boton Detener): parar la sesion
+			backgroundAudioActive = false
+			AudioBackgroundService.onStopRequested = null
+			AudioBackgroundService.stop(this)
+			viewModel.session.shutdown()
+		}
 	}
 
 	private fun reconnect()
@@ -161,11 +215,7 @@ class StreamActivity : AppCompatActivity()
 		viewModel.session.resume()
 	}
 
-	// En TV hideSystemUI() no cambia ningún inset, así que el overlay se oculta explícitamente
-	private val hideSystemUIRunnable = Runnable {
-		hideSystemUI()
-		hideOverlay()
-	}
+	private val hideSystemUIRunnable = Runnable { hideSystemUI() }
 
 	private fun showOverlay()
 	{
@@ -330,20 +380,6 @@ class StreamActivity : AppCompatActivity()
 	}
 
 	private fun adjustStreamViewAspect() = adjustSurfaceViewAspect()
-
-	// Control remoto de Google TV: MENU o el botón central abren el selector de modo de pantalla.
-	// Los botones de un joystick/gamepad nunca llegan acá (StreamInput los consume antes).
-	override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean
-	{
-		val fromGamepad = event != null && (event.source and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
-		if(!fromGamepad && (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_DPAD_CENTER))
-		{
-			showOverlay()
-			binding.displayModeToggle.findViewById<View>(binding.displayModeToggle.checkedButtonId)?.requestFocus()
-			return true
-		}
-		return super.onKeyDown(keyCode, event)
-	}
 
 	override fun dispatchKeyEvent(event: KeyEvent) = viewModel.input.dispatchKeyEvent(event) || super.dispatchKeyEvent(event)
 	override fun onGenericMotionEvent(event: MotionEvent) = viewModel.input.onGenericMotionEvent(event) || super.onGenericMotionEvent(event)
