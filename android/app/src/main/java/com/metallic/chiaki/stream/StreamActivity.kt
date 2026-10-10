@@ -101,28 +101,6 @@ class StreamActivity : AppCompatActivity()
 			insets
 		}
 
-		viewModel.onScreenControlsEnabled.observe(this, Observer {
-			if(binding.onScreenControlsSwitch.isChecked != it)
-				binding.onScreenControlsSwitch.isChecked = it
-			if(binding.onScreenControlsSwitch.isChecked)
-				binding.touchpadOnlySwitch.isChecked = false
-		})
-		binding.onScreenControlsSwitch.setOnCheckedChangeListener { _, isChecked ->
-			viewModel.setOnScreenControlsEnabled(isChecked)
-			showOverlay()
-		}
-
-		viewModel.touchpadOnlyEnabled.observe(this, Observer {
-			if(binding.touchpadOnlySwitch.isChecked != it)
-				binding.touchpadOnlySwitch.isChecked = it
-			if(binding.touchpadOnlySwitch.isChecked)
-				binding.onScreenControlsSwitch.isChecked = false
-		})
-		binding.touchpadOnlySwitch.setOnCheckedChangeListener { _, isChecked ->
-			viewModel.setTouchpadOnlyEnabled(isChecked)
-			showOverlay()
-		}
-
 		binding.displayModeToggle.addOnButtonCheckedListener { _, _, _ ->
 			adjustStreamViewAspect()
 			showOverlay()
