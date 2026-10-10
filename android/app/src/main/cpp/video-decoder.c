@@ -9,10 +9,14 @@
 #include <android/native_window_jni.h>
 
 #include <string.h>
+#include <unistd.h>
 
 #define INPUT_BUFFER_TIMEOUT_MS 10
 
 static void *android_chiaki_video_decoder_output_thread_func(void *user);
+
+// tras recrear el decoder pedimos un keyframe nuevo a la consola
+static bool need_keyframe = false;
 
 
 ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *decoder, ChiakiLog *log, int32_t target_width, int32_t target_height, ChiakiCodec codec)
@@ -60,17 +64,16 @@ void android_chiaki_video_decoder_fini(AndroidChiakiVideoDecoder *decoder)
 
 void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder, JNIEnv *env, jobject surface)
 {
+	CHIAKI_LOGI(decoder->log, "set_surface called (surface %s), waiting for decoder mutex", surface ? "valid" : "null");
 	chiaki_mutex_lock(&decoder->codec_mutex);
+	CHIAKI_LOGI(decoder->log, "set_surface got decoder mutex");
 
 	if(!surface)
 	{
-		if(decoder->codec)
-		{
-			kill_decoder(decoder);
-			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
-			// kill_decoder ya libero el mutex
-			return;
-		}
+		// La pantalla se destruyo (app en segundo plano). NO tocamos el decoder:
+		// la sesion y el audio siguen, el video se descarta. Al volver se cambia
+		// la superficie de salida del decoder ya existente.
+		CHIAKI_LOGI(decoder->log, "Surface removed, keeping decoder alive (background)");
 		chiaki_mutex_unlock(&decoder->codec_mutex);
 		return;
 	}
@@ -79,14 +82,30 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	{
 #if __ANDROID_API__ >= 23
 		CHIAKI_LOGI(decoder->log, "Video decoder already initialized, swapping surface");
-		ANativeWindow *new_window = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
-		AMediaCodec_setOutputSurface(decoder->codec, new_window);
-		ANativeWindow_release(decoder->window);
-		decoder->window = new_window;
+		ANativeWindow *new_window = ANativeWindow_fromSurface(env, surface);
+		media_status_t sr = AMediaCodec_setOutputSurface(decoder->codec, new_window);
+		if(sr == AMEDIA_OK)
+		{
+			if(decoder->window)
+				ANativeWindow_release(decoder->window);
+			decoder->window = new_window;
+			goto beach;
+		}
+		// El decoder quedo inutilizable (superficie anterior abandonada): recrearlo
+		CHIAKI_LOGE(decoder->log, "Swapping surface failed (%d), recreating decoder", (int)sr);
+		ANativeWindow_release(new_window);
+		kill_decoder(decoder); // libera el mutex
+		chiaki_mutex_lock(&decoder->codec_mutex);
+		if(decoder->window)
+		{
+			ANativeWindow_release(decoder->window);
+			decoder->window = NULL;
+		}
+		need_keyframe = true;
 #else
 		CHIAKI_LOGE(decoder->log, "Video Decoder already initialized");
-#endif
 		goto beach;
+#endif
 	}
 
 	decoder->window = ANativeWindow_fromSurface(env, surface);
@@ -155,6 +174,14 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, in
 		goto beach;
 	}
 
+	if(need_keyframe)
+	{
+		// devolver false hace que Chiaki pida un IDR a la consola
+		need_keyframe = false;
+		r = false;
+		goto beach;
+	}
+
 	while(buf_size > 0)
 	{
 		ssize_t codec_buf_index = AMediaCodec_dequeueInputBuffer(decoder->codec, INPUT_BUFFER_TIMEOUT_MS * 1000);
@@ -216,6 +243,8 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 				CHIAKI_LOGI(decoder->log, "Video Decoder Output Thread detected shutdown after reported error");
 				break;
 			}
+			if(status != AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED && status != AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED && status != AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+				usleep(5000); // evita un bucle al 100% de CPU si el decoder esta en error
 		}
 	}
 
