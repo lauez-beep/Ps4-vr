@@ -14,6 +14,9 @@
 
 static void *android_chiaki_video_decoder_output_thread_func(void *user);
 
+// tras recrear el decoder (volver de segundo plano) pedimos un keyframe nuevo
+static bool need_keyframe = false;
+
 ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *decoder, ChiakiLog *log, int32_t target_width, int32_t target_height, ChiakiCodec codec)
 {
 	decoder->log = log;
@@ -67,7 +70,10 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 		{
 			kill_decoder(decoder);
 			CHIAKI_LOGI(decoder->log, "Decoder shut down after surface was removed");
+			// kill_decoder ya libero el mutex
+			return;
 		}
+		chiaki_mutex_unlock(&decoder->codec_mutex);
 		return;
 	}
 
@@ -118,6 +124,7 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 		goto error_codec;
 	}
 
+	need_keyframe = true;
 	ChiakiErrorCode err = chiaki_thread_create(&decoder->output_thread, android_chiaki_video_decoder_output_thread_func, decoder);
 	if(err != CHIAKI_ERR_SUCCESS)
 	{
@@ -147,7 +154,15 @@ bool android_chiaki_video_decoder_video_sample(uint8_t *buf, size_t buf_size, in
 
 	if(!decoder->codec)
 	{
-		CHIAKI_LOGE(decoder->log, "Received video data, but decoder is not initialized!");
+		// sin decoder (modo solo audio): descartar el video en silencio
+		goto beach;
+	}
+
+	if(need_keyframe)
+	{
+		// devolver false hace que Chiaki pida un IDR a la consola
+		need_keyframe = false;
+		r = false;
 		goto beach;
 	}
 
